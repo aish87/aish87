@@ -1,0 +1,178 @@
+﻿DBMS_UTL: hibyehibye
+
+==========
+sudo su – oracle
+pwd
+/usr/lib/oracle/xe
+mkdir db_out_files
+
+CREATE OR REPLACE DIRECTORY myfiles AS '/usr/lib/oracle/xe/db_out_files/'
+/
+
+SELECT grantee
+FROM dba_tab_privs
+WHERE table_name = 'UTL_FILE'
+AND privilege = 'EXECUTE';
+
+connect sys/pwd@db as sysdba
+grant execute on utl_file to mike; 
+
+GRANT READ, WRITE ON DIRECTORY myfiles TO hr
+/
+
+wRITE AND CREATING A FILE IN UR DESKTOP:
+=========================================
+
+set serveroutput on size 1000000
+--
+-- Script to generate csv of Employees name and email addresses
+-- to the MYFILES directory ( /usr/lib/oracle/xe/db_out_files/)
+--
+DECLARE
+    l_file_handle UTL_FILE.FILE_TYPE;
+    l_buffer VARCHAR2(100);
+    l_count PLS_INTEGER := 0;
+BEGIN
+    --
+    -- Using reference notation so you can see the parameter names
+    --
+    -- Note - you don't have to specify max_linesize - defaults to 256
+    -- This parameter does dictate the maximum length of the buffer
+    -- when calling UTL_FILE.PUT_LINE.
+    --
+    l_file_handle := UTL_FILE.FOPEN( location => 'MYFILES', filename => 'emp_em.csv',
+        open_mode => 'W', max_linesize => 100);
+    --
+    -- Now we've opened the file, write a header row. Using positional notation
+    -- to illustrate the similarity with the C fprintf function
+    -- - fprintf( file_pointer, "string");
+    --
+    UTL_FILE.PUT_LINE(l_file_handle, 'First Name'||','||'Last Name'||','||'email');
+    --
+    -- Now loop through the employees table and get all the data
+    --
+    FOR r_emp IN (
+        SELECT first_name, last_name, email
+        FROM hr.employees)
+    LOOP
+        --
+        -- Format the data into comma separated values
+        --
+        l_buffer := r_emp.first_name||','||r_emp.last_name||','||r_emp.email;
+        --
+        -- Back to passing by reference cos it's just better
+        --
+        UTL_FILE.PUT_LINE( file => l_file_handle, buffer => l_buffer);
+        --
+        -- Keep a count of the number of records
+        --
+        l_count := l_count + 1;
+    END LOOP;   
+    UTL_FILE.FCLOSE(l_file_handle);
+    DBMS_OUTPUT.PUT_LINE( l_count||' records written to emp_em.csv.');
+END;
+/
+
+CREATE TABLE spam_targets(
+    first_name VARCHAR2(20),
+    last_name VARCHAR2(20),
+    email VARCHAR2(25))
+/
+
+
+
+set serveroutput on size 1000000
+--
+-- Script to read the emp_em.csv file and insert the contents
+-- into the SPAM_TARGETS table
+--
+DECLARE
+    l_fp UTL_FILE.FILE_TYPE;
+    l_dir VARCHAR2(30) := 'MYFILES';
+    l_fname VARCHAR2(30) := 'emp_em.csv';
+    l_buffer VARCHAR2(100);
+    --
+    -- Variable for doing the substring thing
+    --
+    l_start PLS_INTEGER := 1;
+    l_pos PLS_INTEGER;
+    --
+    -- PL/SQL table to hold the individual data items in each row
+    --
+    TYPE typ_cols IS TABLE OF VARCHAR2(30) INDEX BY PLS_INTEGER;
+    tbl_cols typ_cols;
+    l_col_no PLS_INTEGER;
+    l_count PLS_INTEGER := 0;
+BEGIN
+    --
+    -- Open the file, but this time we want to READ from it
+    --
+    l_fp := UTL_FILE.FOPEN( location => l_dir, filename => l_fname,
+        OPEN_MODE => 'R');
+    IF NOT UTL_FILE.IS_OPEN(l_fp) THEN
+        DBMS_OUTPUT.PUT_LINE('Unable to open file.');
+        RETURN;
+    END IF;
+    --
+    -- Need to discard the first line because it's got the header record.
+    --
+    UTL_FILE.GET_LINE(l_fp, l_buffer);
+    DBMS_OUTPUT.PUT_LINE('Got the header : ');
+    DBMS_OUTPUT.PUT_LINE(l_buffer);
+    --
+    -- Now loop through the rest of the file and insert each record into
+    -- the table
+    --
+    LOOP
+        BEGIN
+            --
+            -- Need this nested block
+            -- because we'll get a NO_DATA_FOUND error when we've
+            -- read past the last line of the file and we need to
+            -- handle it here.
+            --
+            UTL_FILE.GET_LINE( l_fp, l_buffer);
+            IF l_buffer IS NULL THEN
+                --
+                -- End of the file so exit the loop
+                --
+                EXIT;
+            END IF;
+            --
+            -- Split the line back into it's component data items
+            --
+            l_col_no := 1;
+            l_start := 1;
+            WHILE INSTR( l_buffer, ',', 1,l_col_no) != 0 LOOP
+                --
+                -- Loop through the line to get all the values
+                -- Don't really need a PL/SQL table for 3 columns, but if there's
+                -- a lot more it may well save you some typing
+                --
+                l_pos := INSTR( l_buffer, ',', 1, l_col_no);
+                tbl_cols( l_col_no) := SUBSTR( l_buffer, l_start, l_pos - l_start);
+                l_start := l_pos + 1;
+                l_col_no := l_col_no + 1;
+            END LOOP;
+            --
+            -- Get the last value on the line ( it won't have a ',' at the end)
+            --
+            l_start := l_pos + 1;
+            tbl_cols(l_col_no) := SUBSTR( l_buffer, l_start);
+            --
+            -- Now insert the record
+            --
+            INSERT INTO spam_targets( first_name, last_name, email)
+            VALUES( tbl_cols(1), tbl_cols(2), tbl_cols(3));
+            l_count := l_count + 1;
+            DBMS_OUTPUT.PUT_LINE('Insert done - '||l_count);
+        EXCEPTION WHEN NO_DATA_FOUND THEN
+            --
+            -- We've read past the end of the file
+            --
+            EXIT;
+        END;
+    END LOOP;
+    UTL_FILE.FCLOSE( l_fp);
+END;
+/
