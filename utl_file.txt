@@ -1,6 +1,7 @@
-DBMS_UTL:
+DBMS_UTL: dfdsfdsfsdfdsfsd
+
 ==========
-sudo su – oracle
+sudo su â€“ oracle
 pwd
 /usr/lib/oracle/xe
 mkdir db_out_files
